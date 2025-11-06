@@ -75,6 +75,12 @@
         "title": "Configure Settings",
         "category": "QA Test Generator",
         "icon": "$(gear)"
+      },
+      {
+        "command": "qaTestGenerator.testAIConnection",
+        "title": "Test AI API Connection",
+        "category": "QA Test Generator",
+        "icon": "$(plug)"
       }
     ],
     "viewsContainers": {
@@ -237,6 +243,10 @@
         },
         {
           "command": "qaTestGenerator.generateTestCases",
+          "when": "true"
+        },
+        {
+          "command": "qaTestGenerator.testAIConnection",
           "when": "true"
         }
       ],

@@ -335,6 +335,59 @@ function registerCommands(
             await vscode.commands.executeCommand('workbench.action.openSettings', 'qaTestGenerator');
         })
     );
+
+    // Test AI API Connection
+    context.subscriptions.push(
+        vscode.commands.registerCommand('qaTestGenerator.testAIConnection', async () => {
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Testing AI API Connection',
+                cancellable: false
+            }, async (progress) => {
+                try {
+                    progress.report({ message: 'Connecting to AI provider...' });
+                    
+                    const config = vscode.workspace.getConfiguration('qaTestGenerator.ai');
+                    const provider = config.get<string>('provider', 'template-based');
+                    const apiKey = config.get<string>('apiKey', '');
+                    
+                    vscode.window.showInformationMessage(
+                        `Testing connection for: ${provider}\nAPI Key configured: ${apiKey ? 'Yes' : 'No'}`
+                    );
+                    
+                    // Create a new AI provider manager instance
+                    const { AIProviderManager } = require('./services/aiProviderManager');
+                    const aiManager = new AIProviderManager(context);
+                    
+                    const result = await aiManager.testAPIConnection();
+                    
+                    if (result.success) {
+                        vscode.window.showInformationMessage(result.message);
+                    } else {
+                        vscode.window.showErrorMessage(
+                            result.message,
+                            'Show Details'
+                        ).then(selection => {
+                            if (selection === 'Show Details' && result.details) {
+                                const detailsPanel = vscode.window.createOutputChannel('AI API Test Details');
+                                detailsPanel.clear();
+                                detailsPanel.appendLine('AI API Connection Test Failed');
+                                detailsPanel.appendLine('='.repeat(50));
+                                detailsPanel.appendLine(`Provider: ${provider}`);
+                                detailsPanel.appendLine(`API Key Present: ${apiKey ? 'Yes' : 'No'}`);
+                                detailsPanel.appendLine('');
+                                detailsPanel.appendLine('Error Details:');
+                                detailsPanel.appendLine(JSON.stringify(result.details, null, 2));
+                                detailsPanel.show();
+                            }
+                        });
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Connection test failed: ${error}`);
+                }
+            });
+        })
+    );
 }
 
 export function deactivate() {

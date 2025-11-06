@@ -79,6 +79,10 @@ class AIProviderManager {
     async generateTestCases(requirements, issueKey) {
         try {
             vscode.window.showInformationMessage(`🤖 Generating test cases with ${this.getProviderDisplayName()}...`);
+            console.log(`[AI Provider] Provider: ${this.currentConfig.provider}`);
+            console.log(`[AI Provider] API Key present: ${!!this.currentConfig.apiKey}`);
+            console.log(`[AI Provider] Max Tokens: ${this.currentConfig.maxTokens}`);
+            console.log(`[AI Provider] Model: ${this.currentConfig.model || 'default'}`);
             switch (this.currentConfig.provider) {
                 case 'claude-3.5-sonnet':
                 case 'claude-3-opus':
@@ -100,7 +104,20 @@ class AIProviderManager {
             }
         }
         catch (error) {
-            vscode.window.showWarningMessage(`AI generation failed. Falling back to template-based generation. Error: ${error}`);
+            console.error('[AI Provider] Error:', error);
+            // Provide more detailed error message
+            let errorMessage = 'Unknown error';
+            if (error.response) {
+                // Axios error
+                errorMessage = `${error.response.status} - ${JSON.stringify(error.response.data)}`;
+            }
+            else if (error.message) {
+                errorMessage = error.message;
+            }
+            else {
+                errorMessage = String(error);
+            }
+            vscode.window.showWarningMessage(`AI generation failed. Falling back to template-based generation. Error: ${errorMessage}`);
             return this.generateWithTemplates(requirements, issueKey);
         }
     }
@@ -112,9 +129,13 @@ class AIProviderManager {
             throw new Error('Claude API not initialized. Please add API key in settings.');
         }
         const prompt = this.buildPrompt(requirements, issueKey);
+        // Use correct Claude model name
+        const model = this.currentConfig.model || 'claude-3-5-sonnet-20240620';
+        const maxTokens = Math.min(this.currentConfig.maxTokens || 8000, 8000); // Claude max is 8192
+        console.log(`[Claude] Using model: ${model}, max_tokens: ${maxTokens}`);
         const response = await this.anthropic.messages.create({
-            model: this.currentConfig.model || 'claude-3-5-sonnet-20241022',
-            max_tokens: this.currentConfig.maxTokens || 8000,
+            model: model,
+            max_tokens: maxTokens,
             temperature: this.currentConfig.temperature || 0.7,
             messages: [{
                     role: 'user',
@@ -135,9 +156,20 @@ class AIProviderManager {
             throw new Error('OpenAI API not initialized. Please add API key in settings.');
         }
         const prompt = this.buildPrompt(requirements, issueKey);
+        // Get the correct model based on provider selection
+        let defaultModel = 'gpt-4-turbo';
+        if (this.currentConfig.provider === 'gpt-3.5-turbo') {
+            defaultModel = 'gpt-3.5-turbo';
+        }
+        else if (this.currentConfig.provider === 'gpt-4-turbo') {
+            defaultModel = 'gpt-4-turbo';
+        }
+        const model = this.currentConfig.model || defaultModel;
+        const maxTokens = Math.min(this.currentConfig.maxTokens || 4000, 16000); // GPT-4 Turbo max
+        console.log(`[OpenAI] Using model: ${model}, max_tokens: ${maxTokens}`);
         const response = await this.openai.chat.completions.create({
-            model: this.currentConfig.model || 'gpt-4-turbo-preview',
-            max_tokens: this.currentConfig.maxTokens || 4000,
+            model: model,
+            max_tokens: maxTokens,
             temperature: this.currentConfig.temperature || 0.7,
             messages: [{
                     role: 'system',
@@ -160,25 +192,44 @@ class AIProviderManager {
             throw new Error('Groq API key required. Get free key at https://console.groq.com');
         }
         const prompt = this.buildPrompt(requirements, issueKey);
-        const response = await axios_1.default.post('https://api.groq.com/openai/v1/chat/completions', {
-            model: 'llama-3.1-70b-versatile',
-            messages: [{
-                    role: 'system',
-                    content: 'You are an expert QA engineer specializing in test case design.'
-                }, {
-                    role: 'user',
-                    content: prompt
-                }],
-            temperature: 0.7,
-            max_tokens: 8000
-        }, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
+        // Groq has a max_tokens limit of 6000-8000 depending on the model
+        // Updated to use llama-3.3-70b-versatile (llama-3.1-70b-versatile is decommissioned)
+        const model = this.currentConfig.model || 'llama-3.3-70b-versatile';
+        const maxTokens = Math.min(this.currentConfig.maxTokens || 6000, 8000);
+        console.log(`[Groq] Using model: ${model}, max_tokens: ${maxTokens}`);
+        console.log('[Groq] Requirements length:', requirements.length);
+        console.log('[Groq] Requirements preview:', requirements.substring(0, 300));
+        try {
+            const response = await axios_1.default.post('https://api.groq.com/openai/v1/chat/completions', {
+                model: model,
+                messages: [{
+                        role: 'system',
+                        content: 'You are an expert QA engineer specializing in test case design.'
+                    }, {
+                        role: 'user',
+                        content: prompt
+                    }],
+                temperature: this.currentConfig.temperature || 0.7,
+                max_tokens: maxTokens
+            }, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            const content = response.data.choices[0].message.content;
+            vscode.window.showWarningMessage(`Responce of AI: ${content}`);
+            console.log('[Groq] Response received, length:', content?.length || 0);
+            console.log('[Groq] First 200 chars of response:', content?.substring(0, 200));
+            return this.parseTestCasesFromCSV(content);
+        }
+        catch (error) {
+            if (error.response) {
+                console.error('[Groq] API Error:', error.response.status, error.response.data);
+                throw new Error(`Groq API error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
             }
-        });
-        const content = response.data.choices[0].message.content;
-        return this.parseTestCasesFromCSV(content);
+            throw error;
+        }
     }
     /**
      * Ollama (Local) - FREE, Runs on your machine
@@ -214,20 +265,32 @@ class AIProviderManager {
             throw new Error('Hugging Face API key required. Get free key at https://huggingface.co/settings/tokens');
         }
         const prompt = this.buildPrompt(requirements, issueKey);
-        const response = await axios_1.default.post('https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1', {
-            inputs: prompt,
-            parameters: {
-                max_new_tokens: 4000,
-                temperature: 0.7
+        const model = this.currentConfig.model || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+        const maxTokens = Math.min(this.currentConfig.maxTokens || 4000, 4000);
+        console.log(`[HuggingFace] Using model: ${model}, max_new_tokens: ${maxTokens}`);
+        try {
+            const response = await axios_1.default.post(`https://api-inference.huggingface.co/models/${model}`, {
+                inputs: prompt,
+                parameters: {
+                    max_new_tokens: maxTokens,
+                    temperature: this.currentConfig.temperature || 0.7
+                }
+            }, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            const content = response.data[0]?.generated_text || response.data;
+            return this.parseTestCasesFromCSV(content);
+        }
+        catch (error) {
+            if (error.response) {
+                console.error('[HuggingFace] API Error:', error.response.status, error.response.data);
+                throw new Error(`HuggingFace API error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
             }
-        }, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        const content = response.data[0].generated_text;
-        return this.parseTestCasesFromCSV(content);
+            throw error;
+        }
     }
     /**
      * Google Gemini Pro - FREE tier available
@@ -238,19 +301,31 @@ class AIProviderManager {
             throw new Error('Gemini API key required. Get free key at https://makersuite.google.com/app/apikey');
         }
         const prompt = this.buildPrompt(requirements, issueKey);
-        const response = await axios_1.default.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
-            contents: [{
-                    parts: [{
-                            text: prompt
-                        }]
-                }],
-            generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 4000
+        const model = this.currentConfig.model || 'gemini-pro';
+        const maxTokens = Math.min(this.currentConfig.maxTokens || 4000, 8192); // Gemini Pro max is 8192
+        console.log(`[Gemini] Using model: ${model}, maxOutputTokens: ${maxTokens}`);
+        try {
+            const response = await axios_1.default.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+                contents: [{
+                        parts: [{
+                                text: prompt
+                            }]
+                    }],
+                generationConfig: {
+                    temperature: this.currentConfig.temperature || 0.7,
+                    maxOutputTokens: maxTokens
+                }
+            });
+            const content = response.data.candidates[0].content.parts[0].text;
+            return this.parseTestCasesFromCSV(content);
+        }
+        catch (error) {
+            if (error.response) {
+                console.error('[Gemini] API Error:', error.response.status, error.response.data);
+                throw new Error(`Gemini API error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
             }
-        });
-        const content = response.data.candidates[0].content.parts[0].text;
-        return this.parseTestCasesFromCSV(content);
+            throw error;
+        }
     }
     /**
      * Template-based generation - FREE, Always works, Basic quality
@@ -277,40 +352,68 @@ class AIProviderManager {
      * Build prompt for AI generation
      */
     buildPrompt(requirements, issueKey) {
-        return `You are an expert QA engineer. Generate comprehensive test cases for Jira issue ${issueKey}.
+        return `You are an expert QA engineer specializing in test case design. Analyze the following Jira ticket and generate comprehensive, detailed test cases.
 
-Requirements:
+JIRA TICKET: ${issueKey}
 ${requirements}
 
-Generate test cases in this EXACT CSV format (include the header):
+CRITICAL INSTRUCTIONS:
+1. ANALYZE THE TICKET CAREFULLY - Read the entire description, acceptance criteria, and all details mentioned
+2. EXTRACT ALL TESTABLE ELEMENTS - Identify every UI component, field, button, validation, workflow step, and business rule mentioned
+3. CREATE GRANULAR TEST CASES - For each element mentioned, create specific test cases
+4. GENERATE COMPREHENSIVE COVERAGE:
+   - For each field/component mentioned: test display, data validation, formatting, boundaries
+   - For each workflow: test happy path, alternative paths, error scenarios
+   - For each business rule: test valid cases, edge cases, invalid cases
+   - Include: UI verification, data integrity, integration points, error handling, accessibility
+5. NUMBER OF TEST CASES: Generate Number of test cases based on the ticket description/requirement
+
+GENERATE TEST CASES IN THIS EXACT CSV FORMAT (include header):
 Test Case ID,Test Case Name,Objective,Preconditions,Test Steps,Expected Result,Priority
 
-Requirements:
-1. Create 25-30 comprehensive test cases
-2. Cover: happy path, edge cases, error handling, UI/UX, accessibility, security
-3. Test Case ID: TC001, TC002, etc.
-4. Priority: High, Medium, or Low
-5. Test Steps: Use \\n for line breaks (e.g., "1. Step one\\n2. Step two")
-6. Preconditions: Clear setup requirements
-7. Expected Result: Measurable, specific outcomes
+FORMATTING RULES:
+1. Test Case ID: TC001, TC002, TC003, etc. (sequential)
+2. Test Case Name: Short, descriptive title (e.g., "Verify Progress bar displays correct percentage")
+3. Objective: Clear purpose (e.g., "To verify that the progress bar accurately calculates and displays completion percentage based on checklist items")
+4. Preconditions: Specific setup (e.g., "1. User is logged in\n2. Checklist with 10 items exists\n3. 5 items are completed")
+5. Test Steps: Detailed numbered steps using \\n for breaks (e.g., "1. Navigate to checklist page\\n2. Locate Progress bar\\n3. Verify percentage displays as 50%\\n4. Complete one more item\\n5. Verify percentage updates to 60%")
+6. Expected Result: Specific, measurable outcome (e.g., "Progress bar shows 50% initially, updates to 60% after completing 6th item, visual bar fills proportionally")
+7. Priority: High (critical functionality), Medium (important features), Low (nice-to-have)
 
-Important formatting rules:
-- Use quotes for multi-line fields
-- Escape quotes inside fields with double quotes
-- Each test case on one line
-- Separate columns with commas
+CSV FORMATTING:
+- Enclose multi-line fields in double quotes
+- Escape internal quotes with double quotes ("")
+- One test case per line
+- Comma-separated values
+- No extra line breaks within a row
 
-Generate the CSV now:`;
+COVERAGE REQUIREMENTS:
+✓ Functional Testing - Every feature mentioned
+✓ UI Testing - Every component, field, button, layout element
+✓ Data Validation - Every input field with valid/invalid data
+✓ Boundary Testing - Min/max values, character limits
+✓ Integration Testing - Data flow between components
+✓ Error Handling - All error scenarios mentioned or implied
+✓ Negative Testing - Invalid inputs, unauthorized access
+✓ Edge Cases - Empty states, null values, special characters
+✓ Accessibility - Screen reader support, keyboard navigation
+✓ Responsiveness - Different screen sizes if UI-related
+
+Generate comprehensive CSV test cases NOW:`;
     }
     /**
      * Parse CSV response into TestCase objects
      */
     parseTestCasesFromCSV(csvText) {
         const testCases = [];
+        console.log('[CSV Parser] Raw response length:', csvText.length);
+        console.log('[CSV Parser] First 500 chars:', csvText.substring(0, 500));
         // Extract CSV content (remove markdown code blocks if present)
         let cleanedText = csvText.replace(/```csv\n?/g, '').replace(/```\n?/g, '');
         // Split into lines
         const lines = cleanedText.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+        console.log('[CSV Parser] Total lines found:', lines.length);
+        console.log('[CSV Parser] First line (header):', lines[0]);
         // Skip header line
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
@@ -328,6 +431,14 @@ Generate the CSV now:`;
                     priority: parts[6].trim()
                 });
             }
+            else {
+                console.log(`[CSV Parser] Line ${i} has insufficient columns (${parts.length}):`, line.substring(0, 100));
+            }
+        }
+        console.log('[CSV Parser] Successfully parsed test cases:', testCases.length);
+        if (testCases.length === 0) {
+            console.warn('[CSV Parser] No test cases parsed! Response may not be in CSV format.');
+            throw new Error('Failed to parse CSV response. AI may not have generated valid CSV format.');
         }
         return testCases;
     }
@@ -401,6 +512,128 @@ Generate the CSV now:`;
             'template-based': 'Template-Based (FREE)'
         };
         return names[this.currentConfig.provider] || 'Unknown';
+    }
+    /**
+     * Test API connection for the configured provider
+     */
+    async testAPIConnection() {
+        try {
+            switch (this.currentConfig.provider) {
+                case 'groq-llama-3.1':
+                    return await this.testGroqConnection();
+                case 'claude-3.5-sonnet':
+                case 'claude-3-opus':
+                    return await this.testClaudeConnection();
+                case 'gpt-4-turbo':
+                case 'gpt-3.5-turbo':
+                    return await this.testOpenAIConnection();
+                case 'gemini-pro':
+                    return await this.testGeminiConnection();
+                default:
+                    return { success: true, message: `${this.currentConfig.provider} does not require API testing` };
+            }
+        }
+        catch (error) {
+            return {
+                success: false,
+                message: `Connection test failed: ${error.message}`,
+                details: error.response?.data
+            };
+        }
+    }
+    async testGroqConnection() {
+        const apiKey = this.currentConfig.apiKey;
+        if (!apiKey) {
+            return { success: false, message: 'No API key configured' };
+        }
+        try {
+            const response = await axios_1.default.post('https://api.groq.com/openai/v1/chat/completions', {
+                model: 'llama-3.3-70b-versatile',
+                messages: [{ role: 'user', content: 'Hello' }],
+                max_tokens: 10
+            }, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            return {
+                success: true,
+                message: '✅ Groq API connection successful!',
+                details: { model: response.data.model, status: 'connected' }
+            };
+        }
+        catch (error) {
+            let errorDetails = 'Unknown error';
+            if (error.response) {
+                errorDetails = JSON.stringify(error.response.data, null, 2);
+            }
+            return {
+                success: false,
+                message: `❌ Groq API Error (${error.response?.status || 'unknown'}): ${errorDetails}`,
+                details: error.response?.data
+            };
+        }
+    }
+    async testClaudeConnection() {
+        if (!this.anthropic) {
+            return { success: false, message: 'Claude API not initialized' };
+        }
+        try {
+            await this.anthropic.messages.create({
+                model: 'claude-3-5-sonnet-20240620',
+                max_tokens: 10,
+                messages: [{ role: 'user', content: 'Hello' }]
+            });
+            return { success: true, message: '✅ Claude API connection successful!' };
+        }
+        catch (error) {
+            return {
+                success: false,
+                message: `❌ Claude API Error: ${error.message}`,
+                details: error
+            };
+        }
+    }
+    async testOpenAIConnection() {
+        if (!this.openai) {
+            return { success: false, message: 'OpenAI API not initialized' };
+        }
+        try {
+            await this.openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [{ role: 'user', content: 'Hello' }],
+                max_tokens: 10
+            });
+            return { success: true, message: '✅ OpenAI API connection successful!' };
+        }
+        catch (error) {
+            return {
+                success: false,
+                message: `❌ OpenAI API Error: ${error.message}`,
+                details: error
+            };
+        }
+    }
+    async testGeminiConnection() {
+        const apiKey = this.currentConfig.apiKey;
+        if (!apiKey) {
+            return { success: false, message: 'No API key configured' };
+        }
+        try {
+            await axios_1.default.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+                contents: [{ parts: [{ text: 'Hello' }] }],
+                generationConfig: { maxOutputTokens: 10 }
+            });
+            return { success: true, message: '✅ Gemini API connection successful!' };
+        }
+        catch (error) {
+            return {
+                success: false,
+                message: `❌ Gemini API Error: ${error.message}`,
+                details: error.response?.data
+            };
+        }
     }
     /**
      * Check if provider is available
