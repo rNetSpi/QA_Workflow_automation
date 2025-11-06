@@ -1,0 +1,285 @@
+{
+  "name": "qa-test-generator",
+  "displayName": "QA Test Generator Pro",
+  "description": "Automated test case generation from Jira requirements with Zephyr Scale integration and Playwright code generation",
+  "version": "1.0.0",
+  "publisher": "yourname",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourorg/qa-test-generator"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "test",
+    "qa",
+    "jira",
+    "zephyr",
+    "playwright",
+    "automation",
+    "test case",
+    "test generation"
+  ],
+  "activationEvents": [
+    "onCommand:qaTestGenerator.fetchJiraIssue",
+    "onCommand:qaTestGenerator.generateTestCases",
+    "onCommand:qaTestGenerator.uploadToZephyr",
+    "onView:qaTestGenerator.requirementsView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "qaTestGenerator.fetchJiraIssue",
+        "title": "Fetch Jira Issue",
+        "category": "QA Test Generator",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "qaTestGenerator.generateTestCases",
+        "title": "Generate Test Cases",
+        "category": "QA Test Generator",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "qaTestGenerator.uploadToZephyr",
+        "title": "Upload to Zephyr Scale",
+        "category": "QA Test Generator",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "qaTestGenerator.linkToJira",
+        "title": "Link Test Cases to Jira",
+        "category": "QA Test Generator",
+        "icon": "$(link)"
+      },
+      {
+        "command": "qaTestGenerator.generatePlaywright",
+        "title": "Generate Playwright Tests",
+        "category": "QA Test Generator",
+        "icon": "$(code)"
+      },
+      {
+        "command": "qaTestGenerator.runCompleteWorkflow",
+        "title": "Run Complete Workflow",
+        "category": "QA Test Generator",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "qaTestGenerator.configure",
+        "title": "Configure Settings",
+        "category": "QA Test Generator",
+        "icon": "$(gear)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "qaTestGenerator",
+          "title": "QA Test Generator",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "qaTestGenerator": [
+        {
+          "id": "qaTestGenerator.requirementsView",
+          "name": "Requirements"
+        },
+        {
+          "id": "qaTestGenerator.testCasesView",
+          "name": "Test Cases"
+        },
+        {
+          "id": "qaTestGenerator.zephyrView",
+          "name": "Zephyr Browser"
+        },
+        {
+          "id": "qaTestGenerator.workflowView",
+          "name": "Workflow Status"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "QA Test Generator",
+      "properties": {
+        "qaTestGenerator.jira.host": {
+          "type": "string",
+          "default": "https://yourcompany.atlassian.net",
+          "description": "Jira host URL"
+        },
+        "qaTestGenerator.jira.email": {
+          "type": "string",
+          "description": "Jira email address"
+        },
+        "qaTestGenerator.jira.apiToken": {
+          "type": "string",
+          "description": "Jira API token (will be stored securely)"
+        },
+        "qaTestGenerator.zephyr.apiToken": {
+          "type": "string",
+          "description": "Zephyr Scale API token"
+        },
+        "qaTestGenerator.zephyr.projectKey": {
+          "type": "string",
+          "default": "PLTF",
+          "description": "Zephyr project key"
+        },
+        "qaTestGenerator.zephyr.projectId": {
+          "type": "string",
+          "default": "10024",
+          "description": "Zephyr project ID"
+        },
+        "qaTestGenerator.zephyr.defaultFolder": {
+          "type": "string",
+          "default": "AutomatedTests",
+          "description": "Default Zephyr folder name"
+        },
+        "qaTestGenerator.testCases.format": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "json",
+            "excel"
+          ],
+          "default": "csv",
+          "description": "Test case export format"
+        },
+        "qaTestGenerator.testCases.outputPath": {
+          "type": "string",
+          "default": "./testCases",
+          "description": "Output path for generated test cases"
+        },
+        "qaTestGenerator.playwright.outputPath": {
+          "type": "string",
+          "default": "./tests",
+          "description": "Output path for Playwright tests"
+        },
+        "qaTestGenerator.playwright.language": {
+          "type": "string",
+          "enum": [
+            "typescript",
+            "javascript"
+          ],
+          "default": "typescript",
+          "description": "Playwright test language"
+        },
+        "qaTestGenerator.playwright.usePOM": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Page Object Model pattern"
+        },
+        "qaTestGenerator.ai.provider": {
+          "type": "string",
+          "enum": [
+            "claude-3.5-sonnet",
+            "claude-3-opus",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo",
+            "groq-llama-3.1",
+            "ollama-local",
+            "huggingface-free",
+            "gemini-pro",
+            "template-based"
+          ],
+          "enumDescriptions": [
+            "🟣 Claude 3.5 Sonnet - Best quality (Paid: ~$3-15/1M tokens)",
+            "🟣 Claude 3 Opus - Highest intelligence (Paid: ~$15-75/1M tokens)",
+            "🟢 GPT-4 Turbo - Excellent quality (Paid: ~$10-30/1M tokens)",
+            "🟢 GPT-3.5 Turbo - Fast and cheap (Paid: ~$0.5-1.5/1M tokens)",
+            "🆓 Groq Llama 3.1 - FREE, very fast",
+            "🆓 Ollama - FREE, runs locally (requires Ollama installed)",
+            "🆓 Hugging Face - FREE tier available",
+            "🆓 Gemini Pro - FREE tier available",
+            "🆓 Template-Based - Always FREE, no API needed"
+          ],
+          "default": "template-based",
+          "description": "AI provider for test case generation. FREE options: Groq, Ollama, Gemini, Template-Based"
+        },
+        "qaTestGenerator.ai.apiKey": {
+          "type": "string",
+          "description": "API key for AI provider (stored securely). Get free key: Groq (console.groq.com), Gemini (makersuite.google.com)"
+        },
+        "qaTestGenerator.ai.model": {
+          "type": "string",
+          "description": "Specific model name (optional, uses defaults)"
+        },
+        "qaTestGenerator.ai.maxTokens": {
+          "type": "number",
+          "default": 8000,
+          "description": "Maximum tokens for AI generation"
+        },
+        "qaTestGenerator.ai.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "AI creativity level (0=conservative, 1=creative)"
+        },
+        "qaTestGenerator.ai.ollamaEndpoint": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama server endpoint (for local AI)"
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "qaTestGenerator.fetchJiraIssue",
+          "when": "true"
+        },
+        {
+          "command": "qaTestGenerator.generateTestCases",
+          "when": "true"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "qaTestGenerator.fetchJiraIssue",
+          "when": "view == qaTestGenerator.requirementsView",
+          "group": "navigation"
+        },
+        {
+          "command": "qaTestGenerator.generateTestCases",
+          "when": "view == qaTestGenerator.testCasesView",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.40.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "axios": "^1.6.0",
+    "csv-parse": "^5.5.0",
+    "csv-stringify": "^6.4.0",
+    "dotenv": "^16.3.0",
+    "openai": "^6.8.0"
+  }
+}
