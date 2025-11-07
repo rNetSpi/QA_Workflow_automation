@@ -218,9 +218,9 @@ class AIProviderManager {
                 }
             });
             const content = response.data.choices[0].message.content;
-            vscode.window.showWarningMessage(`Responce of AI: ${content}`);
             console.log('[Groq] Response received, length:', content?.length || 0);
             console.log('[Groq] First 200 chars of response:', content?.substring(0, 200));
+            console.log('[Groq] Full response:', content);
             return this.parseTestCasesFromCSV(content);
         }
         catch (error) {
@@ -364,8 +364,7 @@ CRITICAL INSTRUCTIONS:
 4. GENERATE COMPREHENSIVE COVERAGE:
    - For each field/component mentioned: test display, data validation, formatting, boundaries
    - For each workflow: test happy path, alternative paths, error scenarios
-   - For each business rule: test valid cases, edge cases, invalid cases
-   - Include: UI verification, data integrity, integration points, error handling, accessibility
+   - For each business rule: test valid cases, edge cases, invalid cases, UI verification
 5. NUMBER OF TEST CASES: Generate Number of test cases based on the ticket description/requirement
 
 GENERATE TEST CASES IN THIS EXACT CSV FORMAT (include header):
@@ -386,6 +385,9 @@ CSV FORMATTING:
 - One test case per line
 - Comma-separated values
 - No extra line breaks within a row
+- DO NOT add any notes, disclaimers, or explanatory text after the test cases
+- DO NOT add lines like "Note: The priority of each test case is subjective..."
+- Only output the CSV header and test case rows, nothing else
 
 COVERAGE REQUIREMENTS:
 ✓ Functional Testing - Every feature mentioned
@@ -398,6 +400,8 @@ COVERAGE REQUIREMENTS:
 ✓ Edge Cases - Empty states, null values, special characters
 ✓ Accessibility - Screen reader support, keyboard navigation
 ✓ Responsiveness - Different screen sizes if UI-related
+
+IMPORTANT: Generate ONLY the CSV header and test case rows. NO additional notes or explanations.
 
 Generate comprehensive CSV test cases NOW:`;
     }
@@ -414,11 +418,21 @@ Generate comprehensive CSV test cases NOW:`;
         const lines = cleanedText.split('\n').filter(line => line.trim() && !line.startsWith('#'));
         console.log('[CSV Parser] Total lines found:', lines.length);
         console.log('[CSV Parser] First line (header):', lines[0]);
-        // Skip header line
+        // Skip header line(s) and notes
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line)
                 continue;
+            // Skip header rows (check if line starts with "Test Case ID")
+            if (line.startsWith('Test Case ID') || line.startsWith('"Test Case ID')) {
+                console.log(`[CSV Parser] Skipping header row at line ${i}`);
+                continue;
+            }
+            // Skip note lines
+            if (line.toLowerCase().startsWith('note:') || line.toLowerCase().includes('the priority of each test case is subjective')) {
+                console.log(`[CSV Parser] Skipping note line at line ${i}`);
+                continue;
+            }
             const parts = this.parseCSVLine(line);
             if (parts.length >= 7) {
                 testCases.push({

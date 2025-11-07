@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const jiraService_1 = require("./services/jiraService");
 const zephyrService_1 = require("./services/zephyrService");
 const testGeneratorService_1 = require("./services/testGeneratorService");
@@ -46,11 +48,15 @@ let jiraService;
 let zephyrService;
 let testGeneratorService;
 let playwrightGeneratorService;
+// Flag to prevent multiple simultaneous uploads
+let isUploading = false;
+// Store the most recent upload results for linking
+let lastUploadResults = null;
 function activate(context) {
     console.log('QA Test Generator extension is now active!');
-    // Initialize services
+    // Initialize services (ZephyrService needs JiraService for getting issue IDs)
     jiraService = new jiraService_1.JiraService(context);
-    zephyrService = new zephyrService_1.ZephyrService(context);
+    zephyrService = new zephyrService_1.ZephyrService(context, jiraService);
     testGeneratorService = new testGeneratorService_1.TestGeneratorService();
     playwrightGeneratorService = new playwrightGeneratorService_1.PlaywrightGeneratorService();
     // Initialize tree views
@@ -145,74 +151,169 @@ function registerCommands(context, requirementsProvider, testCasesProvider) {
     }));
     // Upload to Zephyr
     context.subscriptions.push(vscode.commands.registerCommand('qaTestGenerator.uploadToZephyr', async () => {
-        const testCases = testCasesProvider.getTestCases();
-        const jiraKey = testCasesProvider.getJiraKey();
-        if (!testCases || testCases.length === 0) {
-            vscode.window.showWarningMessage('No test cases to upload');
+        // Prevent multiple simultaneous uploads
+        if (isUploading) {
+            vscode.window.showWarningMessage('⚠️ Upload already in progress. Please wait...');
+            console.log('[Upload] Upload already in progress, skipping');
             return;
         }
-        const config = vscode.workspace.getConfiguration('qaTestGenerator');
-        let folderName = config.get('zephyr.defaultFolder', 'AutomatedTests');
-        // Ask user for folder name
-        const inputFolder = await vscode.window.showInputBox({
-            prompt: 'Enter Zephyr folder name',
-            value: folderName,
-            placeHolder: 'AutomatedTests'
-        });
-        if (!inputFolder) {
-            return;
-        }
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: 'Uploading to Zephyr Scale',
-            cancellable: false
-        }, async (progress) => {
-            try {
-                progress.report({ message: 'Finding folder...' });
-                const folderId = await zephyrService.findFolderByName(inputFolder);
-                progress.report({ message: `Uploading ${testCases.length} test cases...` });
-                const results = await zephyrService.uploadTestCases(testCases, folderId, (current, total) => {
-                    progress.report({
-                        message: `Uploading test case ${current}/${total}...`,
-                        increment: (1 / total) * 100
+        try {
+            isUploading = true;
+            console.log('[Upload] Starting upload command');
+            const testCases = testCasesProvider.getTestCases();
+            const jiraKey = testCasesProvider.getJiraKey();
+            console.log(`[Upload] Test cases count: ${testCases?.length || 0}`);
+            console.log(`[Upload] Jira key: ${jiraKey || 'none'}`);
+            if (!testCases || testCases.length === 0) {
+                vscode.window.showWarningMessage('No test cases to upload. Generate test cases first.');
+                isUploading = false;
+                return;
+            }
+            const config = vscode.workspace.getConfiguration('qaTestGenerator');
+            let folderName = config.get('zephyr.defaultFolder', 'AutomatedTests');
+            console.log(`[Upload] Default folder: ${folderName}`);
+            // Ask user for folder name - timeout after 60 seconds
+            console.log('[Upload] Prompting for folder name...');
+            const inputPromise = vscode.window.showInputBox({
+                prompt: 'Enter Zephyr folder name (or press ESC to cancel)',
+                value: folderName,
+                placeHolder: 'AutomatedTests',
+                title: 'Zephyr Upload',
+                ignoreFocusOut: false // Allow closing by clicking outside
+            });
+            // Add timeout
+            const timeoutPromise = new Promise((resolve) => {
+                setTimeout(() => {
+                    console.log('[Upload] Input timeout after 60 seconds');
+                    resolve(undefined);
+                }, 60000);
+            });
+            const inputFolder = await Promise.race([inputPromise, timeoutPromise]);
+            if (!inputFolder) {
+                console.log('[Upload] User cancelled folder input or timeout');
+                vscode.window.showInformationMessage('Upload cancelled');
+                isUploading = false;
+                return;
+            }
+            console.log(`[Upload] Selected folder: ${inputFolder}`);
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Uploading to Zephyr Scale',
+                cancellable: false
+            }, async (progress) => {
+                try {
+                    console.log('[Upload] Starting upload process...');
+                    progress.report({ message: 'Finding folder...' });
+                    console.log(`[Upload] Finding folder: ${inputFolder}`);
+                    const folderId = await zephyrService.findFolderByName(inputFolder);
+                    console.log(`[Upload] Found folder ID: ${folderId}`);
+                    progress.report({ message: `Uploading ${testCases.length} test cases...` });
+                    console.log(`[Upload] Uploading ${testCases.length} test cases...`);
+                    const results = await zephyrService.uploadTestCases(testCases, folderId, (current, total) => {
+                        console.log(`[Upload] Progress: ${current}/${total}`);
+                        progress.report({
+                            message: `Uploading test case ${current}/${total}...`,
+                            increment: (1 / total) * 100
+                        });
                     });
-                });
-                vscode.window.showInformationMessage(`✅ Uploaded ${results.successful} test cases to Zephyr`, 'Link to Jira').then(selection => {
-                    if (selection === 'Link to Jira') {
-                        vscode.commands.executeCommand('qaTestGenerator.linkToJira');
+                    console.log(`[Upload] Upload completed. Success: ${results.successful}, Failed: ${results.failed}`);
+                    // Store upload results for linking
+                    if (results.successful > 0 && results.uploadedTestCases.length > 0) {
+                        lastUploadResults = {
+                            uploadedTestCases: results.uploadedTestCases,
+                            jiraKey: jiraKey || '',
+                            timestamp: new Date().toISOString()
+                        };
+                        // Save upload results to JSON file
+                        try {
+                            const workspace = vscode.workspace.workspaceFolders?.[0];
+                            if (workspace) {
+                                const outputPath = path.join(workspace.uri.fsPath, 'testCases');
+                                if (!fs.existsSync(outputPath)) {
+                                    fs.mkdirSync(outputPath, { recursive: true });
+                                }
+                                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                                const jsonFileName = `upload_results_${timestamp}.json`;
+                                const jsonFilePath = path.join(outputPath, jsonFileName);
+                                const uploadData = {
+                                    summary: {
+                                        jiraKey: jiraKey || '',
+                                        total: testCases.length,
+                                        successful: results.successful,
+                                        failed: results.failed,
+                                        timestamp: lastUploadResults.timestamp,
+                                        folderName: inputFolder
+                                    },
+                                    uploadedTestCases: results.uploadedTestCases
+                                };
+                                fs.writeFileSync(jsonFilePath, JSON.stringify(uploadData, null, 2), 'utf-8');
+                                console.log(`[Upload] ✅ Upload results saved to: ${jsonFilePath}`);
+                            }
+                        }
+                        catch (error) {
+                            console.error('[Upload] Failed to save upload results:', error);
+                        }
                     }
-                });
-            }
-            catch (error) {
-                vscode.window.showErrorMessage(`Failed to upload to Zephyr: ${error}`);
-            }
-        });
+                    vscode.window.showInformationMessage(`✅ Uploaded ${results.successful} test cases to Zephyr`, 'Link to Jira').then(selection => {
+                        if (selection === 'Link to Jira') {
+                            console.log('[Upload] User clicked "Link to Jira"');
+                            vscode.commands.executeCommand('qaTestGenerator.linkToJira');
+                        }
+                    });
+                    console.log('[Upload] Upload process finished');
+                }
+                catch (error) {
+                    console.error('[Upload] Upload error:', error);
+                    vscode.window.showErrorMessage(`Failed to upload to Zephyr: ${error}`);
+                }
+                finally {
+                    isUploading = false;
+                    console.log('[Upload] Upload flag reset');
+                }
+            });
+        }
+        catch (error) {
+            console.error('[Upload] Unexpected error:', error);
+            vscode.window.showErrorMessage(`Upload failed: ${error}`);
+            isUploading = false;
+        }
     }));
     // Link to Jira
     context.subscriptions.push(vscode.commands.registerCommand('qaTestGenerator.linkToJira', async () => {
-        const jiraKey = testCasesProvider.getJiraKey();
+        // Check if we have recent upload results
+        if (!lastUploadResults || lastUploadResults.uploadedTestCases.length === 0) {
+            vscode.window.showWarningMessage('No recent upload found. Please upload test cases first.');
+            console.warn('[Link] No upload results available');
+            return;
+        }
+        const jiraKey = lastUploadResults.jiraKey || testCasesProvider.getJiraKey();
         if (!jiraKey) {
             vscode.window.showWarningMessage('No Jira issue associated with test cases');
             return;
         }
-        const config = vscode.workspace.getConfiguration('qaTestGenerator');
-        const folderName = config.get('zephyr.defaultFolder', 'AutomatedTests');
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'Linking Test Cases to Jira',
             cancellable: false
         }, async (progress) => {
             try {
-                progress.report({ message: 'Fetching test cases from folder...' });
-                const testCaseKeys = await zephyrService.getTestCasesFromFolder(folderName);
-                progress.report({ message: `Linking ${testCaseKeys.length} test cases...` });
-                const results = await zephyrService.linkTestCasesToJira(testCaseKeys, jiraKey, (current, total) => {
+                // Get Jira issue to extract the ID
+                console.log(`[Link] Fetching Jira issue ${jiraKey} to get ID...`);
+                progress.report({ message: `Getting Jira issue details...` });
+                const issue = await jiraService.getIssueComplete(jiraKey);
+                const jiraIssueId = parseInt(issue.issue.id);
+                console.log(`[Link] Jira issue ID: ${jiraIssueId}`);
+                console.log(`[Link] Linking ${lastUploadResults.uploadedTestCases.length} test cases to ${jiraKey}`);
+                progress.report({ message: `Linking ${lastUploadResults.uploadedTestCases.length} test cases...` });
+                const results = await zephyrService.linkTestCasesToJira(lastUploadResults.uploadedTestCases, jiraKey, jiraIssueId, (current, total) => {
                     progress.report({
                         message: `Linking test case ${current}/${total}...`,
                         increment: (1 / total) * 100
                     });
                 });
-                vscode.window.showInformationMessage(`✅ Linked ${results.successful} test cases to ${jiraKey}`);
+                if (results.successful > 0) {
+                    vscode.window.showInformationMessage(`✅ Linked ${results.successful} test cases to ${jiraKey}`);
+                }
             }
             catch (error) {
                 vscode.window.showErrorMessage(`Failed to link test cases: ${error}`);

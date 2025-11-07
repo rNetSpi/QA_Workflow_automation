@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import axios, { AxiosInstance } from 'axios';
 
 export interface JiraIssue {
+    id: string;
     key: string;
     summary: string;
     description: any;
@@ -67,6 +68,7 @@ export class JiraService {
             const issue = response.data;
 
             return {
+                id: issue.id,
                 key: issue.key,
                 summary: issue.fields.summary,
                 description: issue.fields.description,
@@ -98,6 +100,7 @@ export class JiraService {
 
             // Get basic issue info
             const jiraIssue: JiraIssue = {
+                id: issue.id,
                 key: issue.key,
                 summary: issue.fields.summary,
                 description: issue.fields.description,

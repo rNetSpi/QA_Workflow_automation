@@ -3,7 +3,8 @@
   "displayName": "QA Test Generator Pro",
   "description": "Automated test case generation from Jira requirements with Zephyr Scale integration and Playwright code generation",
   "version": "1.0.0",
-  "publisher": "yourname",
+  "publisher": "assertionsquad",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/yourorg/qa-test-generator"
@@ -130,7 +131,11 @@
         },
         "qaTestGenerator.zephyr.apiToken": {
           "type": "string",
-          "description": "Zephyr Scale API token"
+          "description": "Zephyr Scale API token (Bearer token for creating test cases)"
+        },
+        "qaTestGenerator.zephyr.jwtToken": {
+          "type": "string",
+          "description": "Zephyr JWT token (for adding test steps via TM4J API)"
         },
         "qaTestGenerator.zephyr.projectKey": {
           "type": "string",

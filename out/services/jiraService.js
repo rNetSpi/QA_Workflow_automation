@@ -74,6 +74,7 @@ class JiraService {
             const response = await this.client.get(`/rest/api/3/issue/${issueKey}`);
             const issue = response.data;
             return {
+                id: issue.id,
                 key: issue.key,
                 summary: issue.fields.summary,
                 description: issue.fields.description,
@@ -103,6 +104,7 @@ class JiraService {
             const issue = response.data;
             // Get basic issue info
             const jiraIssue = {
+                id: issue.id,
                 key: issue.key,
                 summary: issue.fields.summary,
                 description: issue.fields.description,
